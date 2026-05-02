@@ -415,19 +415,28 @@ def upload_data_local() -> dict:
     user's filesystem) is the whole point — using a Modal function would
     look for the files inside the container, where they don't exist.
     """
-    found = []
-    # force=False skips re-upload if the file already exists with the same
-    # content — avoids re-pushing 900 MB on every restart.
-    with volume.batch_upload(force=False) as batch:
-        for name in ("train.jsonl", "val.jsonl"):
-            local = LOCAL_DATA_DIR / name
-            if not local.exists():
-                raise FileNotFoundError(
-                    f"{local} missing; run `python -m train.format_for_cloud` first"
-                )
-            batch.put_file(str(local), f"/input/{name}")
-            found.append(name)
-    return {"uploaded": found, "remote_dir": str(REMOTE_INPUT_DIR)}
+    # Per-file upload so an existing file (FileExistsError) just skips
+    # rather than aborting the whole batch. Avoids re-pushing 900 MB on
+    # every restart while still uploading new files.
+    uploaded: list[str] = []
+    skipped: list[str] = []
+    for name in ("train.jsonl", "val.jsonl"):
+        local = LOCAL_DATA_DIR / name
+        if not local.exists():
+            raise FileNotFoundError(
+                f"{local} missing; run `python -m train.format_for_cloud` first"
+            )
+        try:
+            with volume.batch_upload(force=False) as batch:
+                batch.put_file(str(local), f"/input/{name}")
+            uploaded.append(name)
+        except FileExistsError:
+            skipped.append(name)
+    return {
+        "uploaded": uploaded,
+        "skipped": skipped,
+        "remote_dir": str(REMOTE_INPUT_DIR),
+    }
 
 
 @app.function(
