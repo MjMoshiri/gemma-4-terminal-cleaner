@@ -30,6 +30,24 @@ def test_ls_listing_format():
         assert re.match(r"^[-dlrwxs]{10}\s+\d+\s+\S+\s+\S+\s+\d+\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}\s+\S+", line)
 
 
+def test_ps_listing_deterministic():
+    g = PsListingGenerator()
+    assert g.generate(random.Random(11)) == g.generate(random.Random(11))
+
+
+def test_ps_listing_no_ansi():
+    assert "\x1b[" not in PsListingGenerator().generate(random.Random(11))
+
+
+def test_df_listing_deterministic():
+    g = DfListingGenerator()
+    assert g.generate(random.Random(13)) == g.generate(random.Random(13))
+
+
+def test_df_listing_no_ansi():
+    assert "\x1b[" not in DfListingGenerator().generate(random.Random(13))
+
+
 def test_ps_listing_format():
     out = PsListingGenerator().generate(random.Random(11))
     lines = out.strip().split("\n")
