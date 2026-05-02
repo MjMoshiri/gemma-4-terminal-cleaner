@@ -66,7 +66,8 @@ gemma_4/
 ├── data/                   # (3) Generated training data (jsonl, gitignored)
 │   ├── train.jsonl         #     ~180k pairs
 │   ├── val.jsonl           #     ~10k pairs
-│   └── eval_real/          #     ~500 hand-curated real (dirty, clean) pairs
+│   ├── eval_real.jsonl     #     ~500 hand-curated real (dirty, clean) pairs
+│   └── eval_passthrough.jsonl  # ~200 already-clean inputs; output should ≈ input
 │
 ├── train/                  # (4) MLX-LM QLoRA training
 │   ├── config.yaml         #     model, lora rank, lr, seq_len, batch
@@ -162,8 +163,9 @@ Each clean sample is dirtied 1–3 times under different recipes.
 ### 5.5 Sequence length policy
 
 - ~90% of pairs target **<2k tokens combined** (input+output).
-- Long-tail **5–10%** up to **8k tokens** so the model handles big outputs.
-- Anything longer is rare; v1 caps at 8k.
+- Long-tail **5–10%** up to **4k tokens** so the model handles meaningfully big outputs.
+- The **training cap is 4096 tokens** (matches `max_seq_length` in 6.5). Pairs exceeding this are dropped during data prep, not silently truncated.
+- For inference, the model can run at native 128K context — the 4k training cap does not bound inference length, only training-time examples. The model generalizes upward when given longer real inputs.
 
 ### 5.6 Generation volumes
 
@@ -314,7 +316,7 @@ Per-slice metrics localize where to add training data.
 - Captured by running commands in real shells; labels hand-cleaned with cross-check.
 - The **only** dataset that touches real command output during training/eval — keeps the synthetic-vs-real distribution gap visible.
 
-**`eval_passthrough.jsonl`** — 200 pairs with already-clean input; output must equal input. Stress-tests the model against over-correcting on clean input. Critical: a model that "always cleans something" is worse than no model.
+**`eval_passthrough.jsonl`** — 200 pairs with already-clean input. Output should be substantively identical to input (token-count ±2%, no information atoms removed — see 7.5). Stress-tests the model against over-correcting on clean input. Critical: a model that "always cleans something" is worse than no model.
 
 ### 7.5 v1 acceptance criteria
 
