@@ -70,25 +70,20 @@ REMOTE_INPUT_DIR = REMOTE_DATA_DIR / "input"
 
 # Image: lock to Python 3.11; install the deep-learning + MLX stack.
 #
-# Pinning strategy: only constrain what's truly load-bearing. Letting pip
-# resolve unsloth's transitive deps freely is more reliable than us guessing
-# version compatibility. The two non-negotiable pins:
-#   - torch==2.4.1 — unsloth's bundled CUDA kernels target this exact version.
-#   - transformers<5 — v5 is a major rewrite that breaks PEFT/TRL/unsloth.
+# Pinning strategy: pin unsloth + torch to specific versions and let unsloth
+# pull its own (already-tested) transitive deps. We use uv_pip_install for
+# faster, deterministic resolution — pip's backtracker explodes on the
+# unsloth/peft/trl/transformers constraint web.
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
-    .pip_install(
-        # Critical pins
+    .uv_pip_install(
+        # Pinned to the exact CUDA-kernel-compatible torch unsloth ships with.
         "torch==2.4.1",
-        "transformers<5",
-        # Let unsloth pull its preferred peft/bnb/accelerate versions
-        "unsloth",
-        # Other deps with permissive bounds
-        "trl<0.25",
-        "datasets<5",
-        "huggingface-hub",
-        "safetensors",
+        # Pin to a specific unsloth release so the resolver doesn't search
+        # backwards through every minor version.
+        "unsloth==2026.4.8",
+        # MLX conversion (CPU build is fine here)
         "mlx-lm",
         "tqdm",
         "sentencepiece",
