@@ -399,31 +399,25 @@ def train(
     }
 
 
-@app.function(
-    timeout=60 * 30,
-    volumes={str(REMOTE_DATA_DIR): volume},
-)
-def upload_data() -> dict:
+def upload_data_local() -> dict:
     """Sync local ``data/cloud/{train,val}.jsonl`` into the Modal Volume.
 
-    Run via ``modal run train/cloud_train.py::upload_data`` *after* you've
-    produced ``data/cloud`` with ``train.format_for_cloud``.
+    This is a LOCAL function (no @app.function decorator) — it runs in the
+    user's shell and uses ``volume.batch_upload()`` to push files to the
+    remote volume. Reading files from `LOCAL_DATA_DIR` (which is on the
+    user's filesystem) is the whole point — using a Modal function would
+    look for the files inside the container, where they don't exist.
     """
-    REMOTE_INPUT_DIR.mkdir(parents=True, exist_ok=True)
     found = []
-    for name in ("train.jsonl", "val.jsonl"):
-        local = LOCAL_DATA_DIR / name
-        if not local.exists():
-            raise FileNotFoundError(
-                f"{local} missing; run `python -m train.format_for_cloud` first"
-            )
-        # Streaming copy to keep memory bounded (these files are 850 MB+).
-        dest = REMOTE_INPUT_DIR / name
-        with local.open("rb") as src_f, dest.open("wb") as dst_f:
-            while chunk := src_f.read(1 << 22):  # 4 MB
-                dst_f.write(chunk)
-        found.append(name)
-    volume.commit()
+    with volume.batch_upload(force=True) as batch:
+        for name in ("train.jsonl", "val.jsonl"):
+            local = LOCAL_DATA_DIR / name
+            if not local.exists():
+                raise FileNotFoundError(
+                    f"{local} missing; run `python -m train.format_for_cloud` first"
+                )
+            batch.put_file(str(local), f"/input/{name}")
+            found.append(name)
     return {"uploaded": found, "remote_dir": str(REMOTE_INPUT_DIR)}
 
 
@@ -473,7 +467,7 @@ def main(
     download the merged MLX weights back to ``download_to``.
     """
     print("[cloud_train] uploading data to volume…")
-    upload_summary = upload_data.remote()
+    upload_summary = upload_data_local()
     print(f"[cloud_train] upload: {upload_summary}")
 
     print(f"[cloud_train] launching train(dry_run={dry_run}, iters={iters})")

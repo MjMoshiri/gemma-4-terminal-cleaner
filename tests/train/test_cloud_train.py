@@ -30,7 +30,7 @@ def test_module_imports_without_error():
     # Sanity: the Modal app + functions exist and have the expected names.
     assert cloud_train.APP_NAME == "gemma-4-terminal-cleaner"
     assert hasattr(cloud_train, "train")
-    assert hasattr(cloud_train, "upload_data")
+    assert hasattr(cloud_train, "upload_data_local")
     assert hasattr(cloud_train, "download_output")
     assert hasattr(cloud_train, "main")
 
