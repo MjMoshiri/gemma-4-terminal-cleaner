@@ -13,6 +13,7 @@ data/*
 !data/eval_real_flagged.jsonl
 !data/eval_passthrough.jsonl
 models/
+eval/reports/*.json
 
 # OS
 .DS_Store
