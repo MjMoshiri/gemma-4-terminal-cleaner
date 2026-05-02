@@ -78,10 +78,9 @@ image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
     .uv_pip_install(
-        # Unsloth 2026.4 uses torch>=2.6 (needs torch.int1 sub-byte dtypes).
-        "torch==2.6.0",
         # Pin to a specific unsloth release so the resolver doesn't search
-        # backwards through every minor version.
+        # backwards through every minor version. unsloth pulls a compatible
+        # torch as a transitive dep — don't pin torch ourselves.
         "unsloth==2026.4.8",
         # MLX conversion (CPU build is fine here)
         "mlx-lm",
