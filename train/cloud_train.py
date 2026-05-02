@@ -255,6 +255,13 @@ def train(
         model = prepare_model_for_kbit_training(model)
         model = get_peft_model(model, build_lora_config())
 
+    # Gemma 4 is multimodal; FastModel.from_pretrained may return the
+    # multimodal Processor (Gemma4Processor) which routes positional args to
+    # the image branch. Extract the underlying text tokenizer if so.
+    processor = tokenizer
+    if hasattr(processor, "tokenizer"):
+        tokenizer = processor.tokenizer
+
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
