@@ -8,7 +8,10 @@ __pycache__/
 
 # Project artifacts (regenerable)
 corpus/output/
-data/
+data/*
+!data/eval_real.jsonl
+!data/eval_real_flagged.jsonl
+!data/eval_passthrough.jsonl
 models/
 
 # OS
