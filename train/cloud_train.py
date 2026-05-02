@@ -69,26 +69,27 @@ REMOTE_OUTPUT_DIR = REMOTE_DATA_DIR / "output"
 REMOTE_INPUT_DIR = REMOTE_DATA_DIR / "input"
 
 # Image: lock to Python 3.11; install the deep-learning + MLX stack.
-# bitsandbytes is included for QLoRA-style 4-bit training under HF fallback.
+# Tight version pins so pip resolver doesn't backtrack into transformers 5.x
+# (major rewrite, breaks PEFT/TRL contracts) or trl 0.18+ (different SFT API).
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("git")
     .pip_install(
-        # Train stack
+        # Train stack — pin to a known-working mid-2026 combo
         "torch==2.4.1",
-        "transformers>=4.50.0",
-        "peft>=0.13.0",
-        "trl>=0.12.0",
-        "accelerate>=1.0.0",
-        "bitsandbytes>=0.44.0",
-        "datasets>=3.0.0",
+        "transformers>=4.50.0,<5.0",
+        "peft>=0.13.0,<0.16",
+        "trl>=0.12.0,<0.13",
+        "accelerate>=1.0.0,<2.0",
+        "bitsandbytes>=0.44.0,<0.46",
+        "datasets>=3.0.0,<4.0",
         # Unsloth (optional fast path)
-        "unsloth>=2026.4",
+        "unsloth>=2026.4,<2026.7",
         # Hub + safetensors
-        "huggingface-hub>=0.26.0",
-        "safetensors>=0.4.5",
+        "huggingface-hub>=0.26.0,<1.0",
+        "safetensors>=0.4.5,<1.0",
         # MLX conversion (CPU build is fine for the conversion step)
-        "mlx-lm>=0.20.0",
+        "mlx-lm>=0.20.0,<0.32",
         "tqdm",
         "sentencepiece",
         "protobuf",
