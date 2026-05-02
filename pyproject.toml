@@ -23,6 +23,11 @@ server = [
     "fastapi>=0.115.0",
     "uvicorn>=0.32.0",
 ]
+cloud = [
+    # Only needed locally to invoke `modal run`; not used at import time
+    # outside the cloud container. Tests `pytest.importorskip` on it.
+    "modal>=0.66.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

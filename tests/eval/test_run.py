@@ -27,6 +27,7 @@ def test_help_runs_without_error():
     assert "eval.run" in result.stdout or "usage" in result.stdout.lower()
     assert "--adapter" in result.stdout
     assert "--eval-sets" in result.stdout
+    assert "--prefill" in result.stdout
 
 
 def test_unknown_eval_set_returns_nonzero(tmp_path):
@@ -135,6 +136,116 @@ def _stub_generate_returns_input(model, tokenizer, prompt, max_tokens, verbose):
         payload = user_content.split("---\n", 1)[1].rsplit("\n---", 1)[0]
         return payload
     return user_content
+
+
+# --- Prefill + close-marker post-processing ------------------------------
+
+
+def test_apply_chat_template_appends_default_prefill():
+    """Default prefill is the channel-marker; it lands at end of templated prompt."""
+    tok = _StubTokenizer()
+    out = evalrun._apply_chat_template(tok, "dirty payload")
+    assert out.endswith(evalrun.DEFAULT_PREFILL)
+    assert evalrun.DEFAULT_PREFILL == "<|channel>final\n"
+    assert "dirty payload" in out
+
+
+def test_apply_chat_template_empty_prefill_disables():
+    """``prefill=""`` disables the prefill entirely (for A/B testing)."""
+    tok = _StubTokenizer()
+    out = evalrun._apply_chat_template(tok, "dirty payload", prefill="")
+    assert "<|channel>" not in out
+    assert out.endswith("</USER>")
+
+
+def test_apply_chat_template_custom_prefill():
+    tok = _StubTokenizer()
+    out = evalrun._apply_chat_template(tok, "dirty", prefill="MY_PREFIX:")
+    assert out.endswith("MY_PREFIX:")
+
+
+def test_strip_close_marker_truncates_at_first_occurrence():
+    """`pred.split("<channel|>", 1)[0]` semantics."""
+    s = "the answer<channel|><eos>extra"
+    assert evalrun._strip_close_marker(s) == "the answer"
+
+
+def test_strip_close_marker_no_marker_passthrough():
+    s = "no marker here"
+    assert evalrun._strip_close_marker(s) == s
+
+
+def test_strip_close_marker_only_first_occurrence():
+    s = "ans1<channel|>middle<channel|>tail"
+    assert evalrun._strip_close_marker(s) == "ans1"
+
+
+def test_evaluate_set_strips_close_marker_from_prediction(tmp_path):
+    """Generator emits ANSWER<channel|>EXTRA; record's pred should be ANSWER only."""
+    src = tmp_path / "tiny.jsonl"
+    src.write_text(
+        json.dumps({"input": "abc", "output": "abc", "meta": {}}) + "\n"
+    )
+
+    def gen_with_close(model, tokenizer, prompt, max_tokens, verbose):
+        # Simulate model emitting answer, the close marker, then garbage.
+        return "abc<channel|> garbage past the marker"
+
+    records = evalrun._evaluate_set(
+        model=None,
+        tokenizer=_StubTokenizer(),
+        path=src,
+        max_tokens=64,
+        limit=None,
+        generate_fn=gen_with_close,
+    )
+    assert records[0]["pred"] == "abc", records[0]["pred"]
+    assert records[0]["guard_passed"] is True
+
+
+def test_evaluate_set_passes_default_prefill_to_template(tmp_path):
+    """The prefill must reach the prompt that the generator sees."""
+    src = tmp_path / "tiny.jsonl"
+    src.write_text(json.dumps({"input": "x", "output": "x"}) + "\n")
+
+    seen = {}
+
+    def capture(model, tokenizer, prompt, max_tokens, verbose):
+        seen["prompt"] = prompt
+        return "x"
+
+    evalrun._evaluate_set(
+        model=None,
+        tokenizer=_StubTokenizer(),
+        path=src,
+        max_tokens=64,
+        limit=None,
+        generate_fn=capture,
+    )
+    assert seen["prompt"].endswith(evalrun.DEFAULT_PREFILL)
+
+
+def test_evaluate_set_with_disabled_prefill(tmp_path):
+    """Passing ``prefill=""`` reaches the chat template path."""
+    src = tmp_path / "tiny.jsonl"
+    src.write_text(json.dumps({"input": "x", "output": "x"}) + "\n")
+
+    seen = {}
+
+    def capture(model, tokenizer, prompt, max_tokens, verbose):
+        seen["prompt"] = prompt
+        return "x"
+
+    evalrun._evaluate_set(
+        model=None,
+        tokenizer=_StubTokenizer(),
+        path=src,
+        max_tokens=64,
+        limit=None,
+        generate_fn=capture,
+        prefill="",
+    )
+    assert "<|channel>" not in seen["prompt"]
 
 
 def test_evaluate_set_shape(tmp_path):

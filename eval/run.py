@@ -31,6 +31,7 @@ from eval.lossless_guard import lossless_check
 from eval.metrics import exact_match, normalized_match, token_reduction_pct
 from eval.slicing import length_bucket, slice_results
 from infer.ansi_strip import strip
+from train.format_for_cloud import CHANNEL_CLOSE, CHANNEL_OPEN
 from train.prompt_template import INSTRUCTION
 
 
@@ -59,22 +60,57 @@ DEFAULT_DATA_PATHS = {
 # --- Prompt construction -------------------------------------------------
 
 
+DEFAULT_PREFILL = CHANNEL_OPEN
+"""Channel-marker prefill appended after ``add_generation_prompt=True``.
+
+Gemma 4 E2B's base chat template, when given an empty assistant turn, allows
+the model to choose between a *thought* channel (``<|channel>thought\\n...``)
+and a *final* channel (``<|channel>final\\n...``). The 50-step PoC found the
+base model defaults to *thought* — chain-of-thought, not the cleaned answer.
+Prefilling ``CHANNEL_OPEN`` forces the model into the final channel directly.
+
+The cloud training data (see ``train/format_for_cloud.py``) wraps assistant
+content in ``CHANNEL_OPEN + answer + CHANNEL_CLOSE`` so the trained model
+emits exactly this structure; we share the constants from there to keep the
+two paths in lockstep.
+"""
+
+CLOSE_MARKER = CHANNEL_CLOSE
+"""Drop generated text from the first ``CHANNEL_CLOSE`` onward."""
+
+
 def _build_user_content(dirty: str) -> str:
     """User-turn content; matches train/prompt_template.format_chat exactly."""
     return f"{INSTRUCTION}\n\n---\n{dirty}\n---"
 
 
-def _apply_chat_template(tokenizer, dirty: str) -> str:
+def _apply_chat_template(tokenizer, dirty: str, prefill: str = DEFAULT_PREFILL) -> str:
     """Apply the tokenizer's chat template with ``add_generation_prompt=True``.
 
+    After the chat template's open-of-assistant-turn marker, append ``prefill``.
+    With Gemma 4 E2B's template that means we land inside the answer channel
+    immediately, bypassing the thought channel default. Pass ``prefill=""`` to
+    disable.
+
     The model is fine-tuned on chat-templated examples (see
-    ``train/format_dataset.py``); raw-text prompting will not match training
-    distribution and produces poor outputs.
+    ``train/format_dataset.py`` and ``train/format_for_cloud.py``); raw-text
+    prompting will not match training distribution and produces poor outputs.
     """
     messages = [{"role": "user", "content": _build_user_content(dirty)}]
-    return tokenizer.apply_chat_template(
+    prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
+    return prompt + prefill
+
+
+def _strip_close_marker(text: str) -> str:
+    """Drop everything from the first ``<channel|>`` onward.
+
+    The trained model emits ``ANSWER<channel|>`` (then EOS / pad / etc).
+    Stripping at the first close marker gives us the clean answer regardless of
+    what the model emits afterward.
+    """
+    return text.split(CLOSE_MARKER, 1)[0]
 
 
 # --- Per-record evaluation -----------------------------------------------
@@ -88,10 +124,13 @@ def _evaluate_set(
     max_tokens: int = 4096,
     limit: int | None = None,
     generate_fn: Callable[..., str] = generate,
+    prefill: str = DEFAULT_PREFILL,
 ) -> list[dict]:
     """Generate predictions for every record in ``path`` and compute per-record metrics.
 
     The ``generate_fn`` parameter is for tests — the default is ``mlx_lm.generate``.
+    ``prefill`` is appended to the chat-templated prompt to force the model
+    into the answer channel (see ``DEFAULT_PREFILL``).
     """
     with path.open(encoding="utf-8") as f:
         lines = list(f)
@@ -106,12 +145,14 @@ def _evaluate_set(
 
         # Pre-step: deterministic ANSI strip (matches inference path).
         pre = strip(dirty)
-        prompt = _apply_chat_template(tokenizer, pre)
+        prompt = _apply_chat_template(tokenizer, pre, prefill=prefill)
 
         pred = generate_fn(
             model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False
         )
-        pred_clean = strip(pred).strip()
+        # Drop close-marker tail, then ANSI-strip and trim.
+        pred_truncated = _strip_close_marker(pred)
+        pred_clean = strip(pred_truncated).strip()
 
         # Token counts (post-strip pred for fair reduction calc against original input).
         n_in = len(tokenizer.encode(dirty))
@@ -336,6 +377,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=Path("eval/reports"),
         help="Where to write the JSON report.",
     )
+    p.add_argument(
+        "--prefill",
+        type=str,
+        default=DEFAULT_PREFILL,
+        help=(
+            "Text appended to the chat-templated prompt to force the answer "
+            "channel. Default: '<|channel>final\\n'. Pass an empty string to "
+            "disable (A/B testing)."
+        ),
+    )
     return p.parse_args(argv)
 
 
@@ -369,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
             path,
             max_tokens=args.max_tokens,
             limit=args.limit,
+            prefill=args.prefill,
         )
         per_set_records[set_name] = records
         per_set_summary[set_name] = _summarize(records)
@@ -388,6 +440,7 @@ def main(argv: list[str] | None = None) -> int:
         "adapter": adapter_arg,
         "eval_sets": eval_sets,
         "limit": args.limit,
+        "prefill": args.prefill,
         "summary": per_set_summary,
         "slices": per_set_slices,
         "thresholds": threshold_results,
