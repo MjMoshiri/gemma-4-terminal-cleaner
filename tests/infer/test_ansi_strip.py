@@ -38,3 +38,12 @@ def test_strip_empty():
 def test_strip_passthrough_clean_text():
     s = "hello world\nfoo bar\n"
     assert strip(s) == s
+
+
+def test_strip_windows_line_endings():
+    assert strip("foo\r\nbar\r\n") == "foo\nbar\n"
+
+
+def test_strip_mixed_cr_and_crlf():
+    # Progress bar followed by Windows newline
+    assert strip("[#] 50%\r[##]100%\rdone\r\nnext\n") == "done\nnext\n"

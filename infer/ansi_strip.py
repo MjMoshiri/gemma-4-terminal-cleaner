@@ -21,6 +21,7 @@ def strip(text: str) -> str:
     # 4. Other ESC-* short sequences
     text = _OTHER_ESC_RE.sub("", text)
     # 5. \r-collapse per logical line: keep final segment after last \r
+    text = text.replace("\r\n", "\n")  # CRLF → LF before \r-collapse so Windows line endings don't lose content
     out_lines = []
     for line in text.split("\n"):
         segments = line.split("\r")
