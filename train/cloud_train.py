@@ -325,8 +325,10 @@ def train(
         gradient_checkpointing=True,
         logging_steps=25,
         save_steps=500,
-        eval_steps=250,
-        eval_strategy="steps",
+        # In-training eval is expensive (~12 min per pass on 18.7K val
+        # samples). Disabled — we run the canonical eval/run.py pass against
+        # the merged MLX model after training instead.
+        eval_strategy="no",
         save_total_limit=2,
         report_to=[],
         seed=0,
@@ -340,7 +342,6 @@ def train(
         model=model,
         args=training_args,
         train_dataset=raw["train"],
-        eval_dataset=raw["validation"],
         tokenizer=tokenizer,
         dataset_text_field="text",
         max_seq_length=max_seq_length,
@@ -415,7 +416,9 @@ def upload_data_local() -> dict:
     look for the files inside the container, where they don't exist.
     """
     found = []
-    with volume.batch_upload(force=True) as batch:
+    # force=False skips re-upload if the file already exists with the same
+    # content — avoids re-pushing 900 MB on every restart.
+    with volume.batch_upload(force=False) as batch:
         for name in ("train.jsonl", "val.jsonl"):
             local = LOCAL_DATA_DIR / name
             if not local.exists():
