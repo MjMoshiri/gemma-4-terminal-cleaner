@@ -8,7 +8,7 @@ ARGS=(
 )
 
 if [[ "${1:-}" == "--dry-run" ]]; then
-    echo "Would run: caffeinate -i uv run python -m mlx_lm.lora ${ARGS[*]}"
+    echo "Would run: caffeinate -i uv run python -m train.run_lora ${ARGS[*]}"
     exit 0
 fi
 
@@ -28,4 +28,4 @@ fi
 mkdir -p models/adapter
 
 # Caffeinate keeps the Mac awake during long runs
-exec caffeinate -i uv run python -m mlx_lm.lora "${ARGS[@]}"
+exec caffeinate -i uv run python -m train.run_lora "${ARGS[@]}"
