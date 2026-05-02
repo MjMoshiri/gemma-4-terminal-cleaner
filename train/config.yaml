@@ -1,0 +1,45 @@
+# Gemma 4 E2B QLoRA config — matches spec §6.3, §6.5
+# mlx-lm 0.31.3 schema (verified via --help and source inspection)
+model: models/base/gemma-4-E2B-it-4bit
+data: data/mlx
+adapter_path: models/adapter
+
+# LoRA
+fine_tune_type: lora
+num_layers: 16          # last 16 transformer layers
+lora_parameters:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  scale: 10.0
+  keys:
+    - "self_attn.q_proj"
+    - "self_attn.o_proj"
+  # NOTE: k_proj and v_proj excluded — Gemma 4 E2B has num_kv_shared_layers=20,
+  # so the last 20 layers (including all 16 we target) don't have independent
+  # k_proj/v_proj projections; they share KV from earlier layers.
+
+# Training
+iters: 45000            # ~2 epochs at 180k pairs / batch 8
+batch_size: 1
+grad_checkpoint: true
+grad_accumulation_steps: 8
+# lr_schedule replaces top-level learning_rate when specified;
+# warmup_steps moved inside lr_schedule as "warmup" (mlx-lm 0.31.3 schema)
+lr_schedule:
+  name: cosine_decay
+  arguments: [2.0e-4, 45000, 1.0e-5]
+  warmup: 100           # linear warmup steps (was top-level warmup_steps in plan)
+
+# Sequence length
+max_seq_length: 4096
+
+# Validation / checkpointing
+val_batches: 25
+steps_per_eval: 250
+steps_per_report: 50
+save_every: 500
+
+# Loss masking: only compute loss on assistant turn
+mask_prompt: true
+seed: 0
