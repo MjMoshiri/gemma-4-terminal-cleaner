@@ -81,7 +81,7 @@ image = (
         "peft>=0.13.0,<0.16",
         "trl>=0.12.0,<0.13",
         "accelerate>=1.0.0,<2.0",
-        "bitsandbytes>=0.44.0,<0.46",
+        "bitsandbytes>=0.45.5,<0.50",
         "datasets>=3.0.0,<4.0",
         # Unsloth (optional fast path)
         "unsloth>=2026.4,<2026.7",
