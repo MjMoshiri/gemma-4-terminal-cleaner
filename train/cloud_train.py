@@ -406,6 +406,135 @@ def train(
     }
 
 
+@app.function(
+    gpu="H100",
+    timeout=60 * 30,
+    secrets=[hf_secret],
+    volumes={str(REMOTE_DATA_DIR): volume},
+)
+def merge_only() -> dict:
+    """Manually merge the saved LoRA adapter into a fresh bf16 base, then
+    MLX-convert. Used as a recovery step when ``train()``'s PEFT-based merge
+    fails on Gemma 4 (PEFT only injects into ``nn.Linear``; Gemma 4 wraps
+    q/k/v/o_proj in ``Gemma4ClippableLinear`` for attention soft-capping).
+
+    Math is the standard LoRA merge::
+
+        W_merged = W_base + (alpha / r) * B @ A
+
+    where each (A, B) pair is read from ``adapter_model.safetensors`` and the
+    target ``W_base`` is the ``.linear.weight`` inside ``Gemma4ClippableLinear``.
+    """
+    import shutil
+
+    import torch  # type: ignore[import-not-found]
+    from safetensors.torch import load_file  # type: ignore[import-not-found]
+    from transformers import (  # type: ignore[import-not-found]
+        AutoModelForCausalLM,
+        AutoTokenizer,
+    )
+
+    os.environ.setdefault("HF_TOKEN", os.environ.get("HF_TOKEN", ""))
+    volume.reload()
+
+    adapter_dir = REMOTE_OUTPUT_DIR / "adapter"
+    merged_hf_dir = REMOTE_OUTPUT_DIR / "merged_hf"
+    merged_mlx_dir = REMOTE_OUTPUT_DIR / "merged_mlx"
+    if not adapter_dir.exists():
+        raise FileNotFoundError(f"{adapter_dir} missing — run train() first")
+
+    cfg = json.loads((adapter_dir / "adapter_config.json").read_text())
+    r = int(cfg["r"])
+    alpha = int(cfg["lora_alpha"])
+    scale = alpha / r
+    print(f"[merge] r={r} alpha={alpha} scale={scale}")
+
+    adapter_path = adapter_dir / "adapter_model.safetensors"
+    if not adapter_path.exists():
+        adapter_path = adapter_dir / "adapter_model.bin"
+    print(f"[merge] loading adapter weights from {adapter_path}")
+    if adapter_path.suffix == ".safetensors":
+        adapter_sd = load_file(str(adapter_path))
+    else:
+        adapter_sd = torch.load(str(adapter_path), map_location="cpu")
+
+    pairs: dict[str, dict[str, torch.Tensor]] = {}
+    for k, v in adapter_sd.items():
+        tail = k[len("base_model.model.") :] if k.startswith("base_model.model.") else k
+        if tail.endswith(".lora_A.weight"):
+            pairs.setdefault(tail[: -len(".lora_A.weight")], {})["A"] = v
+        elif tail.endswith(".lora_B.weight"):
+            pairs.setdefault(tail[: -len(".lora_B.weight")], {})["B"] = v
+    print(f"[merge] {len(pairs)} adapter target modules in state dict")
+
+    print(f"[merge] loading base {MODEL_ID_HF} in bf16")
+    base = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID_HF,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+    )
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID_HF)
+
+    def _resolve(path: str):
+        # Adapter paths may include a 'language_model.' prefix if Unsloth
+        # loaded the multimodal wrapper, while a fresh AutoModelForCausalLM
+        # may strip that prefix (or vice-versa). Try common variants.
+        candidates = [path]
+        if path.startswith("language_model."):
+            candidates.append(path[len("language_model.") :])
+        else:
+            candidates.append("language_model." + path)
+        for cand in candidates:
+            try:
+                return base.get_submodule(cand), cand
+            except AttributeError:
+                continue
+        return None, None
+
+    merged_count = 0
+    skipped: list[str] = []
+    for mod_path, mats in pairs.items():
+        if "A" not in mats or "B" not in mats:
+            skipped.append(f"{mod_path} (incomplete pair)")
+            continue
+        target, _resolved = _resolve(mod_path)
+        if target is None:
+            skipped.append(f"{mod_path} (no such submodule on base)")
+            continue
+        if hasattr(target, "linear") and isinstance(target.linear, torch.nn.Linear):
+            linear = target.linear
+        elif isinstance(target, torch.nn.Linear):
+            linear = target
+        else:
+            skipped.append(f"{mod_path} ({type(target).__name__}, no .linear)")
+            continue
+        A = mats["A"].to(linear.weight.dtype).to(linear.weight.device)
+        B = mats["B"].to(linear.weight.dtype).to(linear.weight.device)
+        with torch.no_grad():
+            linear.weight.add_(scale * (B @ A))
+        merged_count += 1
+    print(f"[merge] merged {merged_count}/{len(pairs)} modules in-place")
+    if skipped:
+        print(f"[merge] skipped: {skipped[:5]}{'…' if len(skipped) > 5 else ''}")
+
+    merged_hf_dir.mkdir(parents=True, exist_ok=True)
+    base.save_pretrained(str(merged_hf_dir), safe_serialization=True)
+    tokenizer.save_pretrained(str(merged_hf_dir))
+    print(f"[merge] merged HF -> {merged_hf_dir}")
+    # Commit before any further work — MLX convert is intentionally NOT done
+    # here because `mlx` itself isn't available on Modal's Linux container.
+    # We download the merged HF locally and run mlx_lm.convert on macOS where
+    # MLX is native.
+    volume.commit()
+    return {
+        "phase": "merged_hf",
+        "merged_modules": merged_count,
+        "total_pairs": len(pairs),
+        "skipped_count": len(skipped),
+        "merged_hf_path": str(merged_hf_dir),
+    }
+
+
 def upload_data_local() -> dict:
     """Sync local ``data/cloud/{train,val}.jsonl`` into the Modal Volume.
 
@@ -443,20 +572,18 @@ def upload_data_local() -> dict:
     timeout=60 * 30,
     volumes={str(REMOTE_DATA_DIR): volume},
 )
-def download_output(target: str) -> dict:
-    """Mirror the trained ``merged_mlx`` directory back to a local path.
+def download_output(target: str, subdir: str = "merged_mlx") -> dict:
+    """Mirror a subdirectory of ``REMOTE_OUTPUT_DIR`` back to a local path.
 
-    Modal's ``modal run`` with a function returning a value prints that value;
-    this function returns the list of files copied. Use::
-
-        modal run train/cloud_train.py::download_output \\
-            --target /Users/mjmoshiri/gemma_4/models/trained
+    ``subdir`` defaults to ``merged_mlx`` (the original happy path). Use
+    ``--subdir merged_hf`` after ``merge_only`` to download the bf16 merged
+    HF model for local MLX conversion. Returns the list of files copied.
     """
-    # Pull in writes from the most recent train() commit.
+    # Pull in writes from the most recent commit.
     volume.reload()
-    src_dir = REMOTE_OUTPUT_DIR / "merged_mlx"
+    src_dir = REMOTE_OUTPUT_DIR / subdir
     if not src_dir.exists():
-        raise FileNotFoundError(f"{src_dir} missing — run train first")
+        raise FileNotFoundError(f"{src_dir} missing — run train/merge first")
     target_path = Path(target)
     target_path.mkdir(parents=True, exist_ok=True)
     files: list[str] = []

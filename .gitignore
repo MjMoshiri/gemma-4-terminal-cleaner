@@ -14,6 +14,7 @@ data/*
 !data/eval_passthrough.jsonl
 models/
 eval/reports/*.json
+!eval/reports/sample_before_after.json
 
 # OS
 .DS_Store

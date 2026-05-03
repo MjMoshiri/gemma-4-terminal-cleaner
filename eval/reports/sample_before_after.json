@@ -1,0 +1,22 @@
+{
+  "samples": [
+    {
+      "name": "pip_install_progress",
+      "dirty": "Collecting requests\n  Downloading requests-2.31.0-py3-none-any.whl.metadata (4.6 kB)\rDownloading requests-2.31.0-py3-none-any.whl (62 kB)\n   \u001b[91m\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u001b[0m \u001b[32m20.1/62.1 kB\u001b[0m \u001b[31m1.2 MB/s\u001b[0m eta \u001b[36m0:00:00\u001b[0m\r   \u001b[91m\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u001b[0m \u001b[32m62.1/62.1 kB\u001b[0m \u001b[31m1.5 MB/s\u001b[0m eta \u001b[36m0:00:00\u001b[0m\nInstalling collected packages: requests\nSuccessfully installed requests-2.31.0\n",
+      "base_pred": "Collecting requests\n  Downloading requests-2.31.0-py3-none-any.whl.metadata (4.6 kB)\nDownloading requests-2.31.0-py3-none-any.whl (62 kB)\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501 20.1/62.1 kB 1.2 MB/s\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501 62.1/62.1 kB 1.5 MB/s\nInstalling collected packages: requests\nSuccessfully installed requests-2.31.0",
+      "trained_pred": "Collecting requests\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)\n  Downloading requests-2.31.0-py3-none-any.whl (4."
+    },
+    {
+      "name": "build_failure",
+      "dirty": "\u001b[1m\u001b[31mERROR\u001b[0m: \u001b[33mbuild failed\u001b[0m\n  \u001b[36msrc/main.rs:42:5\u001b[0m\n    \u001b[31merror[E0308]\u001b[0m: mismatched types\n       \u001b[34m-->\u001b[0m expected `String`, found `&str`\n",
+      "base_pred": "ERROR: build failed\nsrc/main.rs:42:5\n  error[E0308]: mismatched types\n     --> expected `String`, found `&str`",
+      "trained_pred": "ERROR: build failed\n  src/main.rs:42:5\n    expected `String`, found `&str`\n\n---"
+    },
+    {
+      "name": "spinner_done",
+      "dirty": "\u001b[36m\u280b\u001b[0m Compiling project...\r\u001b[36m\u2819\u001b[0m Compiling project...\r\u001b[36m\u2839\u001b[0m Compiling project...\r\u001b[32m\u2713\u001b[0m Compiled in 3.4s\n",
+      "base_pred": "Compiled in 3.4s",
+      "trained_pred": "Compiling project...\n\u2713 Compiled in 3.4s\n\n---"
+    }
+  ]
+}
