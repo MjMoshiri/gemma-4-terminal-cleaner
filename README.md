@@ -1,37 +1,24 @@
 # Gemma 4 E2B Terminal Output Cleaner — PoC
 
-A proof-of-concept for fine-tuning a **small (2.3B-effective-params) open model**
-to do **lossless cleanup** of dirty terminal output — strip ANSI escapes,
-collapse `\r` progress-bar overwrites, dedupe repeated lines, normalize
-whitespace, etc. — without losing a single information atom.
+Fine-tuning a small (2.3B effective params) open model to clean up dirty terminal output without losing data. Strip ANSI escapes, collapse `\r` progress-bar overwrites, dedupe repeated lines, normalize whitespace. No summarization, no dropped tokens.
 
-The motivation: agent harnesses spend a lot of context on shell-tool output
-that's mostly noise. A cheap on-device model that compresses noise without
-summarizing data is a useful primitive. This repo answers a smaller question:
-**can a small Gemma model, fine-tuned cheaply on synthetic data, learn this
-function?**
+Why bother: agent harnesses burn a lot of context on shell output that's mostly noise. A cheap on-device model that drops noise without touching data is a useful primitive. This repo asks a narrower question: can a small Gemma model, fine-tuned cheaply on synthetic data, learn this?
 
 ## TL;DR
 
-- ✅ End-to-end recipe works: synthetic corpus → 60M-token training set →
-  Modal H100 LoRA fine-tune → MLX 4-bit conversion → local inference.
-- ⚠️ This run was a **500-step PoC** (~$5 of GPU). The model learned the
-  *genre* (output looks like clean terminal output) but didn't reach
-  *faithful copy* yet — long inputs trigger repetition loops.
-- 💡 Out-of-the-box Gemma 4 E2B is already a surprisingly strong baseline.
-  The honest takeaway: **the pipeline is reproducible, the model is
-  undertrained, and a 5–10K-step run (~$50) is the obvious next step.**
+The pipeline works end-to-end: synthetic corpus → 60M-token training set → Modal H100 LoRA fine-tune → MLX 4-bit conversion → local inference.
+
+This was a 500-step run, ~$5 of GPU. The model learned the genre (output looks like clean terminal output) but didn't learn faithful copy yet — long inputs trigger repetition loops.
+
+Honest read: base Gemma 4 E2B out of the box is already a decent baseline. The pipeline is reproducible, the model is undertrained, and a 5–10K-step run (~$50) is the obvious next step.
 
 ## Before / After
 
-Three small samples, run on identical prompts. **Base** is `mlx-community/gemma-4-E2B-it-4bit`
-out of the box. **Fine-tuned** is the 500-step LoRA-merged + MLX-quantized
-checkpoint produced by this repo (regenerate via the steps below). Full inputs and outputs in
-[`eval/reports/sample_before_after.json`](eval/reports/sample_before_after.json).
+Three samples on identical prompts. **Base** is `mlx-community/gemma-4-E2B-it-4bit` out of the box. **Fine-tuned** is the 500-step LoRA-merged + MLX-quantized checkpoint from this repo. Full inputs/outputs in [`eval/reports/sample_before_after.json`](eval/reports/sample_before_after.json).
 
 ### 1. `pip install` progress bar (ANSI + `\r`-overwrites)
 
-**Input** (raw bytes shown with escapes visible):
+**Input** (raw bytes, escapes visible):
 
 ```
 Collecting requests
@@ -43,41 +30,29 @@ Installing collected packages: requests
 Successfully installed requests-2.31.0
 ```
 
-**Base (Gemma 4 E2B, 4-bit, no fine-tune):** ✅ near-perfect — strips ANSI,
-keeps both progress states, preserves the install lines.
+**Base:** near-perfect. Strips ANSI, keeps both progress states, preserves install lines.
 
-**Fine-tuned (500 steps):** ❌ enters a repetition loop —
-`Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)` repeated until cutoff.
-Classic undertraining symptom: model has learned what pip output looks like,
-hasn't learned to mirror this *specific* input.
+**Fine-tuned (500 steps):** repetition loop — `Downloading requests-2.31.0-py3-none-any.whl (4.6 kB)` repeated until cutoff. Classic undertraining: model knows what pip output looks like, doesn't know to mirror this specific input.
 
 ### 2. Build error with ANSI
 
 **Input:** `ERROR: build failed` + `src/main.rs:42:5` + `error[E0308]: mismatched types` + `--> expected 'String', found '&str'`, all wrapped in red/yellow/cyan ANSI.
 
-**Base:** ✅ ANSI stripped, all four lines preserved verbatim.
+**Base:** ANSI stripped, all four lines preserved verbatim.
 
-**Fine-tuned:** ⚠️ ANSI stripped, but **dropped** `error[E0308]: mismatched types`
-— a real lossless violation.
+**Fine-tuned:** ANSI stripped, but dropped `error[E0308]: mismatched types`. Real lossless violation.
 
 ### 3. Spinner + completion
 
 **Input:** three `\r`-overwritten spinner frames followed by `✓ Compiled in 3.4s`.
 
-**Base:** ⚠️ over-collapses to just `Compiled in 3.4s` — drops the
-"Compiling project..." context.
+**Base:** over-collapses to just `Compiled in 3.4s`, drops the "Compiling project..." context.
 
-**Fine-tuned:** ✅ keeps both `Compiling project...` and `✓ Compiled in 3.4s`
-on separate lines.
+**Fine-tuned:** keeps both `Compiling project...` and `✓ Compiled in 3.4s` on separate lines.
 
 ### What this shows
 
-The fine-tuned model **changed the output distribution** (formatting decisions,
-how aggressively to collapse) but at 500 steps it hasn't yet learned the
-**copy-with-edits** behavior the data is teaching. Loss floor was ~1.5 (model
-"knows the type of output"), well above the ~0.3-0.5 you'd need for faithful
-copying. This is consistent with seeing only ~22K of ~352K training records
-(0.045 epochs).
+The fine-tuned model shifted the output distribution (formatting, how aggressively to collapse) but at 500 steps it hasn't learned copy-with-edits. Loss floor was ~1.5 (knows the type of output), well above the ~0.3-0.5 you'd want for faithful copying. Consistent with seeing only ~22K of ~352K training records (0.045 epochs).
 
 ## How it works
 
@@ -111,21 +86,12 @@ clean source text ──►  │ corpus/   (synthetic)   │
                        └─────────────────────────┘
 ```
 
-Key design choices:
+Design choices:
 
-- **Synthetic-first data.** Writing 60M tokens of clean terminal output by
-  hand is insane; programmatically rendering tables/trees/diffs/etc. and then
-  applying randomized ANSI/whitespace/CR transforms is cheap and gives
-  unlimited paired data.
-- **Lossless guard.** Every prediction passes an atom-set check
-  (`eval/lossless_guard.py`) — if any non-noise token from the input is
-  missing from the output, we fall back to deterministic ANSI stripping.
-  The model can never silently lose data.
-- **Cloud LoRA, local inference.** Training runs on a Modal H100 (~$3/hr);
-  the merged model is quantized to MLX 4-bit and runs on the user's Mac.
-- **Channel-marker prompt.** Gemma 4's chat template defaults to the
-  reasoning channel. We prefill `<|channel>final\n` to skip the chain-of-thought
-  preamble and emit the cleaned output directly.
+- **Synthetic-first data.** Hand-writing 60M tokens of clean terminal output is insane. Programmatically rendering tables/trees/diffs/etc. and applying randomized ANSI/whitespace/CR transforms is cheap and gives unlimited paired data.
+- **Lossless guard.** Every prediction goes through an atom-set check (`eval/lossless_guard.py`). If any non-noise token from the input is missing from the output, fall back to deterministic ANSI stripping. Model can't silently lose data.
+- **Cloud LoRA, local inference.** Training on a Modal H100 (~$3/hr), merged model quantized to MLX 4-bit and runs on the user's Mac.
+- **Channel-marker prompt.** Gemma 4's chat template defaults to the reasoning channel. Prefilling `<|channel>final\n` skips the chain-of-thought preamble and emits cleaned output directly.
 
 ## Repo layout
 
@@ -138,8 +104,7 @@ Key design choices:
 | `infer/` | `clean(dirty: str) -> str` with guard fallback |
 | `docs/superpowers/specs/` | Full design doc |
 
-The trained MLX 4-bit weights (~2.4 GB) and 60M-token training set are not
-committed — the recipe below regenerates both deterministically.
+The MLX 4-bit weights (~2.4 GB) and 60M-token training set aren't committed. Recipe below regenerates both deterministically.
 
 ## Reproduce
 
@@ -177,24 +142,15 @@ echo $'\x1b[31mhello\x1b[0m' | uv run python -m infer.clean
 | Modal H100, 500 steps + merge | ~$5 |
 | MLX convert (local) | $0 |
 
-A real V1 (5–10K steps) would land around **$50–80** end-to-end.
+A real V1 (5–10K steps) lands around **$50–80** end-to-end.
 
 ## What I'd do differently
 
-1. **Train longer.** 500 steps was bypass-the-merge-bug-and-validate-pipeline,
-   not "ship a model." Loss curve was still descending normally.
-2. **Mix in real data earlier.** Synthetic data has tells (sterile timestamps,
-   no rare commands). A few hundred hand-curated real (dirty, clean) pairs
-   would help the model generalize.
-3. **Smaller initial corpus, faster iteration.** 60M tokens is overkill for a
-   PoC. 5M tokens × 5K steps would have produced a more useful model and let
-   me iterate.
-4. **Two-stage pipeline.** Deterministic ANSI strip + repetition collapse
-   first, model only on the residual ambiguous cases. The base Gemma 4 E2B
-   is already 80% of the way there on the easy stuff; the model should
-   specialize on the hard stuff.
+1. **Train longer.** 500 steps was bypass-the-merge-bug-and-validate-pipeline, not ship-a-model. Loss curve was still descending normally.
+2. **Mix in real data earlier.** Synthetic data has tells (sterile timestamps, no rare commands). A few hundred hand-curated real (dirty, clean) pairs would help generalization.
+3. **Smaller initial corpus, faster iteration.** 60M tokens is overkill for a PoC. 5M tokens × 5K steps would have produced a more useful model and let me iterate.
+4. **Two-stage pipeline.** Deterministic ANSI strip + repetition collapse first, model only on the residual ambiguous cases. Base Gemma 4 E2B already handles 80% of the easy stuff; the model should specialize on the hard stuff.
 
 ## License
 
-Code: MIT. Model adapter: derived from `google/gemma-4-E2B-it`, see Gemma
-license at <https://ai.google.dev/gemma/terms>.
+Code: MIT. Model adapter: derived from `google/gemma-4-E2B-it`, see Gemma license at <https://ai.google.dev/gemma/terms>.
